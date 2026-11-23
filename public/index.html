@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>おつかいAI — 頼むだけで、予算内で買い物</title>
+<style>
+  :root { --bg:#faf7f2; --card:#fff; --ink:#222; --sub:#777; --line:#e8e2d8; --accent:#e8590c; --ok:#2b8a3e; --warn:#e67700; --ng:#c92a2a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
+  header h1 { font-size:18px; margin:0; }
+  header h1 span { color:var(--accent); }
+  header button { background:none; border:1px solid var(--line); border-radius:8px; padding:6px 10px; cursor:pointer; font-size:13px; }
+  #log { max-width:680px; margin:0 auto; padding:16px 16px 120px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:85%; padding:10px 14px; border-radius:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .ai { align-self:flex-start; background:var(--card); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .products { display:flex; gap:10px; overflow-x:auto; padding:2px 0 6px; }
+  .p { flex:0 0 170px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px; font-size:12px; }
+  .p img { width:100%; aspect-ratio:1; object-fit:contain; background:#f3f3f3; border-radius:8px; }
+  .p .n { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; margin:6px 0 4px; }
+  .p .pr { font-weight:700; font-size:15px; }
+  .p .s { color:var(--sub); }
+  .status { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--warn); border-radius:10px; padding:10px 12px; font-size:14px; }
+  .status.ng { border-left-color:var(--ng); }
+  .buy { background:var(--card); border:2px solid var(--ok); border-radius:12px; padding:12px; font-size:14px; }
+  .buy a { display:block; text-align:center; margin-top:8px; background:var(--ok); color:#fff; text-decoration:none; padding:12px; border-radius:10px; font-weight:700; }
+  .hint { color:var(--sub); font-size:12px; }
+  form#f { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); padding:10px; display:flex; gap:8px; justify-content:center; }
+  form#f textarea { flex:1; max-width:600px; resize:none; border:1px solid var(--line); border-radius:12px; padding:10px; font:inherit; height:46px; }
+  form#f button { background:var(--accent); color:#fff; border:0; border-radius:12px; padding:0 18px; font-weight:700; cursor:pointer; }
+  form#f button:disabled { opacity:.5; }
+  dialog { border:0; border-radius:14px; max-width:440px; width:92%; }
+  dialog input { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font:inherit; margin:8px 0; }
+  dialog .row { display:flex; gap:8px; justify-content:flex-end; }
+  dialog button { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  dialog button.primary { background:var(--accent); color:#fff; border:0; }
+  .welcome { text-align:center; color:var(--sub); padding:30px 10px; line-height:1.8; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:10px; }
+  .chips button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:6px 12px; cursor:pointer; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>おつかい<span>AI</span></h1>
+  <div>
+    <button id="newBtn">新しい買い物</button>
+    <button id="setBtn">財布番の設定</button>
+  </div>
+</header>
+
+<main id="log"></main>
+
+<form id="f">
+  <textarea id="q" placeholder="例: 2000円以内でコーヒー豆を買って"></textarea>
+  <button id="send">送る</button>
+</form>
+
+<dialog id="dlg">
+  <h3 style="margin-top:0">AIの財布番とつなぐ</h3>
+  <p class="hint">おつかいAIは、お金を使う前に必ずあなたの「AIの財布番」に許可を取ります。少額は自動で、それ以上はスマホで承認してから購入ボタンが出ます。</p>
+  <p class="hint">財布番の画面で発行した接続URL(…/saifuban-mcp/sbk_…)を貼ってください。まだの人は <a href="https://ut181749ut.github.io/saifuban/" target="_blank" rel="noopener">こちらで無料で作れます</a>。</p>
+  <input id="keyIn" placeholder="https://…/saifuban-mcp/sbk_…" autocomplete="off">
+  <div class="row"><button id="cancel" type="button">閉じる</button><button id="save" class="primary" type="button">保存</button></div>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+let key = store.get("otsukai.key", "");
+let state = store.get("otsukai.state", null) || fresh();
+function fresh() { return { id: crypto.randomUUID(), messages: [], view: [] }; }
+function save() { store.set("otsukai.state", state); }
+
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const yen = (n) => "¥" + Number(n).toLocaleString("ja-JP");
+
+function render() {
+  const log = $("#log"); log.innerHTML = "";
+  if (!state.view.length) {
+    const w = el("div", "welcome");
+    w.append(el("div", null, "欲しいものを言うだけ。AIが探して、財布番の予算内で買い物を進めます。"));
+    const c = el("div", "chips");
+    ["2000円以内でコーヒー豆を買って", "トイレットペーパーの安いやつ", "1000円くらいのプレゼント用ハンドクリーム"].forEach((t) => {
+      const b = el("button", null, t); b.type = "button"; b.onclick = () => { $("#q").value = t; $("#q").focus(); }; c.append(b);
+    });
+    w.append(c); log.append(w);
+  }
+  state.view.forEach((v) => log.append(draw(v)));
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function draw(v) {
+  if (v.kind === "user") return el("div", "msg user", v.text);
+  if (v.kind === "ai") return el("div", "msg ai", v.text);
+  if (v.kind === "products") {
+    const row = el("div", "products");
+    v.items.forEach((it) => {
+      const card = el("a", "p"); card.href = it.url; card.target = "_blank"; card.rel = "noopener sponsored"; card.style.color = "inherit"; card.style.textDecoration = "none";
+      if (it.image) { const im = el("img"); im.src = it.image; im.alt = ""; im.loading = "lazy"; card.append(im); }
+      card.append(el("div", "n", it.name), el("div", "pr", yen(it.price)), el("div", "s", (it.postage_included ? "送料込" : "送料別") + " ・ " + it.shop));
+      if (it.review?.count) card.append(el("div", "s", "★" + it.review.average + "(" + it.review.count + "件)"));
+      row.append(card);
+    });
+    return row;
+  }
+  if (v.kind === "payment") {
+    const box = el("div", "status" + (v.status === "pending_approval" ? "" : " ng"));
+    if (v.status === "pending_approval") box.append(el("div", null, `⏳ ${yen(v.amount)} の購入をスマホの財布番に確認中です。承認すると自動で続きます。`));
+    else box.append(el("div", null, `✋ 財布番が許可しませんでした(${v.status})${v.reason ? ":" + v.reason : ""}`));
+    return box;
+  }
+  if (v.kind === "checkout") {
+    const box = el("div", "buy");
+    box.append(el("div", null, `✅ 財布番が ${yen(v.amount)} を承認しました`), el("div", "hint", v.item.name + " ×" + v.qty + (v.item.postage_included ? "" : "(送料別)")));
+    const a = el("a", null, "楽天で注文する"); a.href = v.url; a.target = "_blank"; a.rel = "noopener sponsored";
+    box.append(a, el("div", "hint", "楽天の画面で内容を確かめてから注文を確定してください。"));
+    return box;
+  }
+  return el("div");
+}
+
+async function ask(text, hidden) {
+  if (!key) { openSettings(); return; }
+  state.messages.push({ role: "user", content: text });
+  if (!hidden) state.view.push({ kind: "user", text });
+  save(); render(); busy(true);
+  const thinking = el("div", "msg ai", "…"); $("#log").append(thinking);
+  try {
+    const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: state.messages, saifubanKey: key, conversationId: state.id }) });
+    const d = await r.json();
+    if (d.error === "no_saifuban_key") { state.messages.pop(); openSettings(); return; }
+    // 画面用の出来事(商品カード・承認状況・購入ボタン)を、AIの文の前に並べる
+    (d.events || []).forEach((e) => state.view.push(e.type === "products" ? { kind: "products", items: e.items } : { kind: e.type, ...e }));
+    (d.messages || []).forEach((m) => {
+      state.messages.push(m);
+      if (m.role === "assistant") { const t = m.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim(); if (t) state.view.push({ kind: "ai", text: t }); }
+    });
+    if (d.error) state.view.push({ kind: "ai", text: "エラーが起きました: " + (d.message || d.error) });
+    if (d.error && !(d.messages || []).length) state.messages.pop();
+    const pend = (d.events || []).filter((e) => e.type === "payment" && e.status === "pending_approval").pop();
+    if (pend) poll(pend.request_id, pend.item.item_code, pend.qty);
+  } catch (e) {
+    state.messages.pop();
+    state.view.push({ kind: "ai", text: "通信できませんでした。もう一度送ってください。" });
+  } finally { save(); busy(false); render(); }
+}
+
+let polling = null;
+function poll(id, code, qty) {
+  clearInterval(polling);
+  const until = Date.now() + 15 * 60 * 1000;
+  polling = setInterval(async () => {
+    if (Date.now() > until) return clearInterval(polling);
+    try {
+      const r = await fetch("/api/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ saifubanKey: key, request_id: id }) });
+      const d = await r.json();
+      if (d.status && d.status !== "pending_approval") {
+        clearInterval(polling);
+        ask(`(財布番の申請 request_id=${id} の状態が変わりました。check_payment_status で item_code=${code}, quantity=${qty || 1} を確認してください)`, true);
+      }
+    } catch {}
+  }, 5000);
+}
+
+function busy(b) { $("#send").disabled = b; $("#q").disabled = b; }
+function openSettings() { $("#keyIn").value = key; $("#dlg").showModal(); }
+$("#setBtn").onclick = openSettings;
+$("#cancel").onclick = () => $("#dlg").close();
+$("#save").onclick = () => {
+  const m = $("#keyIn").value.match(/sbk_[0-9a-f]{48}/);
+  if (!m) { alert("接続URLの形が違います。財布番の画面でコピーした URL を貼ってください。"); return; }
+  key = m[0]; store.set("otsukai.key", key); $("#dlg").close();
+};
+$("#newBtn").onclick = () => { clearInterval(polling); state = fresh(); save(); render(); };
+$("#f").onsubmit = (e) => { e.preventDefault(); const t = $("#q").value.trim(); if (!t) return; $("#q").value = ""; ask(t); };
+$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#f").requestSubmit(); } });
+render();
+if (!key) openSettings();
+</script>
+</body>
+</html>
