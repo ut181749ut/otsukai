@@ -79,6 +79,8 @@ export default {
     if (url.pathname === "/api/chat" && req.method === "POST") return chat(req, env);
     if (url.pathname === "/api/status" && req.method === "POST") return status(req);
     if (url.pathname.startsWith("/api/")) return json({ error: "not_found" }, 404);
+    // サービスワーカーがまだ動いていないときの共有は、とりあえずアプリを開く
+    if (url.pathname === "/share" && req.method === "POST") return Response.redirect(new URL("/", url), 303);
     return env.ASSETS.fetch(req);
   },
 };

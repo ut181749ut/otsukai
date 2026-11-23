@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>おつかいAI — 頼むだけで、予算内で買い物</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#e8590c">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <style>
   :root { --bg:#faf7f2; --card:#fff; --ink:#222; --sub:#777; --line:#e8e2d8; --accent:#e8590c; --ok:#2b8a3e; --warn:#e67700; --ng:#c92a2a; }
   * { box-sizing: border-box; }
@@ -90,7 +94,7 @@ function render() {
   const log = $("#log"); log.innerHTML = "";
   if (!state.view.length) {
     const w = el("div", "welcome");
-    w.append(el("div", null, "欲しいものを言うだけ。AIが探して、財布番の予算内で買い物を進めます。"), el("div", null, "📷 切れた洗剤や気になる物の写真を送れば、同じ物を探します。"));
+    w.append(el("div", null, "欲しいものを言うだけ。AIが探して、財布番の予算内で買い物を進めます。"), el("div", null, "📷 切れた洗剤や、SNSで見かけた物のスクショを送れば、同じ物を探します。"), el("div", null, "スマホはホーム画面に追加すると、スクショの「共有」からすぐ頼めます。"));
     const c = el("div", "chips");
     ["2000円以内でコーヒー豆を買って", "トイレットペーパーの安いやつ", "1000円くらいのプレゼント用ハンドクリーム"].forEach((t) => {
       const b = el("button", null, t); b.type = "button"; b.onclick = () => { $("#q").value = t; $("#q").focus(); }; c.append(b);
@@ -142,14 +146,39 @@ async function shrink(file, max, quality) {
   return c.toDataURL("image/jpeg", quality);
 }
 let photo = null; // { data, thumb }
-$("#file").onchange = async (e) => {
-  const f = e.target.files[0]; e.target.value = "";
-  if (!f) return;
+async function setPhoto(f) {
   try {
     photo = { data: await shrink(f, 1280, 0.85), thumb: await shrink(f, 240, 0.7) };
     $("#pvImg").src = photo.thumb; $("#pv").hidden = false; $("#q").focus();
-  } catch { alert("この写真は読み込めませんでした。"); }
+    return true;
+  } catch { alert("この写真は読み込めませんでした。"); return false; }
+}
+$("#file").onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (f) setPhoto(f);
 };
+// パソコンでは スクショ → Ctrl+V(⌘V)で貼り付けられる
+document.addEventListener("paste", (e) => {
+  const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/"));
+  if (f) { e.preventDefault(); setPhoto(f); }
+});
+// スマホでは スクショ → 共有 → おつかいAI で、開いた瞬間にAIへ送る
+async function takeShared() {
+  if (!new URLSearchParams(location.search).has("shared")) return;
+  history.replaceState(null, "", "/");
+  try {
+    const cache = await caches.open("otsukai-share");
+    const [pr, tr] = await Promise.all([cache.match("/shared/photo"), cache.match("/shared/text")]);
+    await Promise.all([cache.delete("/shared/photo"), cache.delete("/shared/text")]);
+    const text = tr ? (await tr.text()).slice(0, 500) : "";
+    if (pr && await setPhoto(await pr.blob())) {
+      if (!key) { if (text) $("#q").value = text; return; } // 財布番の設定が先。写真は残しておく
+      if (text) $("#q").value = text;
+      $("#f").requestSubmit();
+    } else if (text) { $("#q").value = text; }
+  } catch {}
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 $("#pvX").onclick = () => { photo = null; $("#pv").hidden = true; };
 
 async function ask(text, hidden, img) {
@@ -228,6 +257,7 @@ $("#f").onsubmit = (e) => {
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#f").requestSubmit(); } });
 render();
 if (!key) openSettings();
+takeShared();
 </script>
 </body>
 </html>
