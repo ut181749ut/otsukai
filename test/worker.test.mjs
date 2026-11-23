@@ -73,4 +73,14 @@ assert.equal(r.events.at(-1).reason, "1日の予算を超えます");
 saifubanReply = () => ({ status: "approved" });
 assert.equal((await post("/api/status", { saifubanKey: KEY, request_id: 9 })).status, "approved");
 
-console.log("ok: 7 scenarios passed");
+// 8. 写真: base64 の画像はAIに届き、URL参照の画像は捨てられる
+calls = [];
+claudeScript = [text("これは〇〇の洗剤だと思います")];
+const img = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } };
+const bad = { type: "image", source: { type: "url", url: "https://evil.example/x.png" } };
+await post("/api/chat", { saifubanKey: KEY, messages: [{ role: "user", content: [img, bad, { type: "text", text: "この写真のものを探して" }] }] });
+const sent = calls.find((c) => c.url.includes("anthropic")).body.messages[0].content;
+assert.equal(sent.length, 2);
+assert.equal(sent[0].source.type, "base64");
+
+console.log("ok: 8 scenarios passed");
