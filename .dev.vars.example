@@ -2,8 +2,3 @@ ANTHROPIC_API_KEY=sk-ant-...
 RAKUTEN_APP_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 RAKUTEN_ACCESS_KEY=pk_...
 RAKUTEN_AFFILIATE_ID=
-# 運営側のAI代も財布番で上限をかけるなら(sbk_ キーを ANTHROPIC_API_KEY に入れる)
-# ANTHROPIC_BASE_URL=https://saifuban.saifuban-app.workers.dev/proxy/anthropic
-# 通知(npm run vapid で作る)
-VAPID_PUBLIC_KEY=
-VAPID_PRIVATE_JWK=

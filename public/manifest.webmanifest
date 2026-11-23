@@ -1,7 +1,7 @@
 {
   "name": "おつかいAI",
   "short_name": "おつかいAI",
-  "description": "写真やスクショを送るだけ。AIが探して、財布番の予算内で買い物を進めます。",
+  "description": "写真やスクショを送るだけ。AIが楽天市場から探して、注文画面まで案内します。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
