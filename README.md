@@ -17,11 +17,14 @@
 - パソコン: スクショを撮って画面で Ctrl+V(⌘V)
 - iPhone: ホーム画面アプリへの共有はiOSが対応していないため、📷ボタンからスクショを選びます
 
+🔔 **通知で完結します。** 財布番の承認通知(商品写真つき)で「承認する」を押すと、おつかいAIから「✅ 承認されました」の写真つき通知が届き、タップで楽天の注文画面が開きます。おつかいAIの画面は閉じていて大丈夫です。
+
 ## 仕組み
 
 - `src/worker.js` — Cloudflare Worker。Claude(ツール使用)+ 楽天市場商品検索API + 財布番MCP
 - `public/index.html` — チャット画面(1ファイル)
-- 利用者ごとの財布番の接続URLはブラウザに保存し、リクエストごとに送ります。サーバーには何も保存しません
+- 利用者ごとの財布番の接続URLはブラウザに保存し、リクエストごとに送ります。例外として「通知で受け取る」を押した申請だけ、承認を見回るために接続URLと通知先を最長24時間 KV に置きます
+- 見回りは1分ごとのCron。通知は暗号化の要らない空のプッシュで起こし、中身はサービスワーカーが `/api/notice` から取りにいきます
 
 ### お金まわりの守り
 
@@ -34,8 +37,9 @@
 
 1. 楽天ウェブサービスでアプリ登録し、`applicationId`(UUID)と `accessKey`(pk_…)を取る。許可するWebサイトに公開URLを登録する
 2. `.dev.vars.example` を `.dev.vars` にコピーして値を入れる
-3. `npm install` → `npm run dev`(手元) / `npm run deploy`(公開)
-4. 公開時は `npx wrangler secret put ANTHROPIC_API_KEY` などで秘密の値を入れ、`wrangler.jsonc` の `SITE_URL` を公開URLにする
+3. 通知を使うなら `npm run vapid` で鍵を作り、`npx wrangler kv namespace create OTSUKAI` で作ったIDを `wrangler.jsonc` に入れる
+4. `npm install` → `npm run dev`(手元) / `npm run deploy`(公開)
+5. 公開時は `npx wrangler secret put ANTHROPIC_API_KEY` などで秘密の値を入れ、`wrangler.jsonc` の `SITE_URL` を公開URLにする
 
 テスト(外部APIは偽物に差し替え): `npm test`
 

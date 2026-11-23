@@ -31,6 +31,8 @@
   .buy { background:var(--card); border:2px solid var(--ok); border-radius:12px; padding:12px; font-size:14px; }
   .buy a { display:block; text-align:center; margin-top:8px; background:var(--ok); color:#fff; text-decoration:none; padding:12px; border-radius:10px; font-weight:700; }
   .hint { color:var(--sub); font-size:12px; }
+  .bell { margin-top:8px; width:100%; padding:10px; border-radius:10px; border:1px solid var(--line); background:#fff8f0; cursor:pointer; font:inherit; font-size:13px; }
+  .buy img { width:72px; height:72px; object-fit:contain; float:left; margin-right:10px; border-radius:8px; background:#f3f3f3; }
   form#f { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line); padding:10px; display:flex; gap:8px; justify-content:center; }
   form#f textarea { flex:1; max-width:600px; resize:none; border:1px solid var(--line); border-radius:12px; padding:10px; font:inherit; height:46px; }
   form#f button { background:var(--accent); color:#fff; border:0; border-radius:12px; padding:0 18px; font-weight:700; cursor:pointer; }
@@ -122,12 +124,20 @@ function draw(v) {
   }
   if (v.kind === "payment") {
     const box = el("div", "status" + (v.status === "pending_approval" ? "" : " ng"));
-    if (v.status === "pending_approval") box.append(el("div", null, `⏳ ${yen(v.amount)} の購入をスマホの財布番に確認中です。承認すると自動で続きます。`));
+    if (v.status === "pending_approval") {
+      box.append(el("div", null, `⏳ ${yen(v.amount)} の購入をスマホの財布番に確認中です。承認すると自動で続きます。`));
+      if (pushable() && !v.watching) {
+        const b = el("button", "bell", "🔔 承認されたら通知で受け取る(この画面を閉じてもOK)"); b.type = "button";
+        b.onclick = async () => { b.disabled = true; b.textContent = await watchByPush(v) ? "🔔 通知で知らせます" : "通知をオンにできませんでした"; };
+        box.append(b);
+      } else if (v.watching) box.append(el("div", "hint", "🔔 承認されたら通知で知らせます"));
+    }
     else box.append(el("div", null, `✋ 財布番が許可しませんでした(${v.status})${v.reason ? ":" + v.reason : ""}`));
     return box;
   }
   if (v.kind === "checkout") {
     const box = el("div", "buy");
+    if (v.item.image) { const im = el("img"); im.src = v.item.image; im.alt = ""; box.append(im); }
     box.append(el("div", null, `✅ 財布番が ${yen(v.amount)} を承認しました`), el("div", "hint", v.item.name + " ×" + v.qty + (v.item.postage_included ? "" : "(送料別)")));
     const a = el("a", null, "楽天で注文する"); a.href = v.url; a.target = "_blank"; a.rel = "noopener sponsored";
     box.append(a, el("div", "hint", "楽天の画面で内容を確かめてから注文を確定してください。"));
@@ -220,6 +230,25 @@ async function ask(text, hidden, img) {
 }
 const PHOTO_DEFAULT = "この写真のものを探して";
 
+// ---- 通知 ----
+let vapidKey;
+const pushable = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && Notification.permission !== "denied";
+function keyBytes(b64) { const s = atob(b64.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((b64.length + 3) % 4)); return Uint8Array.from(s, (c) => c.charCodeAt(0)); }
+async function watchByPush(v) {
+  try {
+    if (vapidKey === undefined) vapidKey = (await (await fetch("/api/config")).json()).vapidPublicKey;
+    if (!vapidKey) return false;
+    if (await Notification.requestPermission() !== "granted") return false;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(vapidKey) });
+    const r = await fetch("/api/watch", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ saifubanKey: key, request_id: v.request_id, item_code: v.item.item_code, qty: v.qty || 1, subscription: sub.toJSON() }) });
+    if (!r.ok) return false;
+    v.watching = true; save();
+    return true;
+  } catch { return false; }
+}
+
 let polling = null;
 function poll(id, code, qty) {
   clearInterval(polling);
@@ -258,6 +287,9 @@ $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKe
 render();
 if (!key) openSettings();
 takeShared();
+// 承認待ちのまま画面を閉じていたら、開き直したときに確認を再開する
+{ const i = state.view.map((v) => v.kind).lastIndexOf("payment"); const v = state.view[i];
+  if (v && v.status === "pending_approval" && !state.view.slice(i).some((x) => x.kind === "checkout")) poll(v.request_id, v.item.item_code, v.qty); }
 </script>
 </body>
 </html>

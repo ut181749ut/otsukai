@@ -5,8 +5,14 @@
   "assets": { "directory": "./public", "binding": "ASSETS" },
   "vars": {
     "MODEL": "claude-sonnet-5-5",
-    "SITE_URL": "https://otsukai-ai.example.workers.dev/"
-  }
+    "SITE_URL": "https://otsukai-ai.example.workers.dev/",
+    "VAPID_SUBJECT": "mailto:you@example.com"
+  },
+  // 承認待ちの見回りと通知の中身の置き場所。`npx wrangler kv namespace create OTSUKAI` で作ったIDを入れる
+  "kv_namespaces": [{ "binding": "KV", "id": "ここにKVのID" }],
+  // 1分ごとに承認待ちを見回る
+  "triggers": { "crons": ["* * * * *"] }
   // 秘密の値は `npx wrangler secret put 名前` で入れる:
   // ANTHROPIC_API_KEY, RAKUTEN_APP_ID, RAKUTEN_ACCESS_KEY, RAKUTEN_AFFILIATE_ID(任意), ANTHROPIC_BASE_URL(任意)
+  // VAPID_PUBLIC_KEY, VAPID_PRIVATE_JWK(`npm run vapid` で作る)
 }

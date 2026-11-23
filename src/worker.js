@@ -1,6 +1,8 @@
 // おつかいAI — 頼むと商品を探して、AIの財布番の承認を取ってから買い物を代行するAI
 // Cloudflare Worker。画面は public/ (assets) から配信し、/api/* をここで処理する。
 
+import { sendEmptyPush, sha256hex } from "./push.js";
+
 const SAIFUBAN_MCP = "https://zrphnuvrsldcycxtdftv.supabase.co/functions/v1/saifuban-mcp";
 const SAIFUBAN_REDEEM = "https://zrphnuvrsldcycxtdftv.supabase.co/functions/v1/saifuban/redeem";
 const RAKUTEN_SEARCH = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601";
@@ -78,12 +80,94 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === "/api/chat" && req.method === "POST") return chat(req, env);
     if (url.pathname === "/api/status" && req.method === "POST") return status(req);
+    if (url.pathname === "/api/config" && req.method === "GET") return json({ vapidPublicKey: pushReady(env) ? env.VAPID_PUBLIC_KEY : null });
+    if (url.pathname === "/api/watch" && req.method === "POST") return watch(req, env);
+    if (url.pathname === "/api/notice" && req.method === "GET") return notice(url, env);
     if (url.pathname.startsWith("/api/")) return json({ error: "not_found" }, 404);
     // サービスワーカーがまだ動いていないときの共有は、とりあえずアプリを開く
     if (url.pathname === "/share" && req.method === "POST") return Response.redirect(new URL("/", url), 303);
     return env.ASSETS.fetch(req);
   },
+  // 1分ごと: 承認待ちを見回り、決まったら通知を送る
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(sweep(env));
+  },
 };
+
+// ---------- 承認されたら通知で知らせる ----------
+
+const pushReady = (env) => Boolean(env.KV && env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_JWK);
+const DAY = 24 * 3600;
+
+// 画面が「通知で受け取る」を押したら、承認待ちの申請と通知先を預かる(24時間で消える)
+async function watch(req, env) {
+  if (!pushReady(env)) return json({ error: "push_not_configured" }, 501);
+  let b;
+  try { b = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
+  const key = parseKey(b.saifubanKey);
+  const rid = Number(b.request_id) | 0;
+  const sub = b.subscription;
+  if (!key || rid <= 0 || !b.item_code || typeof sub?.endpoint !== "string" || !sub.endpoint.startsWith("https://")) return json({ error: "bad_request" }, 400);
+  const kh = (await sha256hex(key)).slice(0, 24);
+  const rec = { key, rid, item_code: String(b.item_code).slice(0, 200), qty: clampQty(b.qty), sub: { endpoint: sub.endpoint }, at: Date.now() };
+  await env.KV.put(`w:${kh}:${rid}`, JSON.stringify(rec), { expirationTtl: DAY });
+  return json({ ok: true });
+}
+
+// サービスワーカーが空のプッシュを受けたら、ここから通知の中身を取る
+async function notice(url, env) {
+  if (!env.KV) return json({ error: "not_configured" }, 501);
+  const ep = String(url.searchParams.get("ep") || "");
+  if (!/^[0-9a-f]{64}$/.test(ep)) return json({ error: "bad_request" }, 400);
+  const v = await env.KV.get(`n:${ep}`);
+  if (!v) return json({ notices: [] });
+  await env.KV.delete(`n:${ep}`);
+  return json({ notices: JSON.parse(v) });
+}
+
+async function addNotice(env, endpoint, n) {
+  const k = `n:${await sha256hex(endpoint)}`;
+  const list = JSON.parse((await env.KV.get(k)) || "[]");
+  list.push(n);
+  await env.KV.put(k, JSON.stringify(list.slice(-5)), { expirationTtl: 3600 });
+}
+
+export async function sweep(env) {
+  if (!pushReady(env)) return;
+  let cursor;
+  do {
+    const page = await env.KV.list({ prefix: "w:", cursor });
+    for (const { name } of page.keys) {
+      try { await checkOne(env, name); } catch (e) { console.error("sweep", name, e); }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+}
+
+async function checkOne(env, name) {
+  const rec = JSON.parse((await env.KV.get(name)) || "null");
+  if (!rec) return;
+  const r = await saifuban(rec.key, "check_payment_status", { request_id: rec.rid, wait_seconds: 0 });
+  if (!r || r.error || r.status === "pending_approval") return; // まだ。財布番に届かないときも次の見回りで
+  const item = await rakutenItem(env, rec.item_code);
+  let n;
+  if (r.status === "approved" && item) {
+    const amount = item.price * rec.qty;
+    const f = await finalize(env, rec.key, r, item, rec.qty, amount);
+    n = f.ok
+      ? { title: `✅ 承認されました ${yen(amount)}`, body: `${item.name.slice(0, 60)} ×${rec.qty}\nタップすると楽天の注文画面が開きます`, image: item.image_large, url: item.url, tag: `otsukai-${rec.rid}` }
+      : { title: "✋ 購入できませんでした", body: `許可証を確認できませんでした(${f.error})`, image: item.image_large, url: "/", tag: `otsukai-${rec.rid}` };
+  } else if (r.status === "approved") {
+    n = { title: "✋ 商品が見つかりません", body: "売り切れた可能性があります。おつかいAIで探し直してください", url: "/", tag: `otsukai-${rec.rid}` };
+  } else {
+    n = { title: "✋ 財布番が許可しませんでした", body: item ? item.name.slice(0, 60) : "", image: item?.image_large, url: "/", tag: `otsukai-${rec.rid}` };
+  }
+  await addNotice(env, rec.sub.endpoint, n);
+  await sendEmptyPush(env, rec.sub);
+  await env.KV.delete(name);
+}
+
+const yen = (n) => "¥" + Number(n).toLocaleString("ja-JP");
 
 // 財布番の接続URL(…/saifuban-mcp/sbk_xxx)でもキー単体でも受け付ける
 export function parseKey(s) {
@@ -170,7 +254,7 @@ async function runTool(ctx, name, input) {
       const items = await rakutenSearch(ctx.env, input);
       if (items.error) return items;
       ctx.events.push({ type: "products", items });
-      return { items: items.map(({ image, ...rest }) => rest) };
+      return { items: items.map(({ image, image_large, ...rest }) => rest) };
     }
     case "get_budget":
       return pickBudget(await saifuban(ctx.key, "get_budget", {}));
@@ -186,6 +270,7 @@ async function runTool(ctx, name, input) {
         reason: `${item.name.slice(0, 60)} ×${qty}${item.postage_included ? "" : "(送料別)"} — ${String(input.reason || "").slice(0, 200)}`,
         recurring: "none",
         idempotency_key: `otsukai:${ctx.convo}:${item.item_code}:${qty}:${amount}`,
+        ...(item.image_large ? { image_url: item.image_large } : {}),
         wait_for_approval_seconds: 20,
       });
       return settle(ctx, r, item, qty, amount);
@@ -204,14 +289,32 @@ async function runTool(ctx, name, input) {
 
 // 承認されたときだけ、許可証(payment_token)を財布番で使用済みにしてから購入ボタンを出す。
 // 金額や支払先が承認内容と合わなければ財布番が拒否するので、ボタンは出ない。
+// 承認済みの許可証を使用済みにする。画面と通知の見回りの両方から呼ばれるので、
+// 使用済みにできた申請は KV に覚えておき、2回目は覚えた結果を返す。
+export async function finalize(env, key, r, item, qty, amount) {
+  const doneKey = env.KV && r?.request_id ? `d:${(await sha256hex(key)).slice(0, 24)}:${r.request_id}` : null;
+  const remembered = async () => {
+    const d = doneKey && JSON.parse((await env.KV.get(doneKey)) || "null");
+    return d && d.item_code === item.item_code && d.amount === amount ? { ok: true } : null;
+  };
+  if (await remembered()) return { ok: true };
+  const red = await redeem(r.payment_token, merchantOf(item), amount);
+  if (red?.valid) {
+    if (doneKey) await env.KV.put(doneKey, JSON.stringify({ item_code: item.item_code, amount }), { expirationTtl: 7 * DAY });
+    return { ok: true };
+  }
+  if (red?.error === "already_used" && (await remembered())) return { ok: true }; // 同時に使用済みにした場合
+  return { ok: false, error: red?.error || "unknown" };
+}
+
 async function settle(ctx, r, item, qty, amount) {
   const st = r?.status;
   const base = { status: st || "error", request_id: r?.request_id, amount, item_code: item.item_code };
   if (st === "approved") {
-    const red = await redeem(r.payment_token, merchantOf(item), amount);
-    if (!red?.valid) {
-      ctx.events.push({ type: "payment", status: "denied", amount, item, reason: "許可証を確認できませんでした(" + (red?.error || "unknown") + ")" });
-      return { ...base, status: "denied", reason: "payment_token の確認に失敗: " + (red?.error || "unknown") };
+    const red = await finalize(ctx.env, ctx.key, r, item, qty, amount);
+    if (!red.ok) {
+      ctx.events.push({ type: "payment", status: "denied", amount, item, reason: "許可証を確認できませんでした(" + red.error + ")" });
+      return { ...base, status: "denied", reason: "payment_token の確認に失敗: " + red.error };
     }
     ctx.events.push({ type: "checkout", item, qty, amount, url: item.url });
     return { ...base, message: "購入ボタンを表示しました。ユーザーが押すと楽天の注文画面に進みます。" };
@@ -307,7 +410,14 @@ export function normalize(it) {
     review: { average: it.reviewAverage, count: it.reviewCount },
     url: it.affiliateUrl || it.itemUrl,
     image: typeof img === "string" ? img : img?.imageUrl,
+    image_large: largeImage(typeof img === "string" ? img : img?.imageUrl),
   };
+}
+
+// 楽天の画像は ?_ex=128x128 で大きさを選べる。通知用に大きめにする
+function largeImage(u) {
+  if (!u || !u.startsWith("https://")) return undefined;
+  try { const x = new URL(u); x.searchParams.set("_ex", "500x500"); return x.href; } catch { return undefined; }
 }
 
 async function rakutenSearch(env, input) {
