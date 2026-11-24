@@ -5,7 +5,7 @@
   "assets": { "directory": "./public", "binding": "ASSETS" },
   "vars": {
     "MODEL": "claude-sonnet-5-5",
-    "SITE_URL": "https://otsukai-ai.example.workers.dev/"
+    "SITE_URL": "https://otsukai-ai.saifuban-app.workers.dev/"
   },
   // 使いすぎ防止: 同じIPから1分に6回まで(1回の相談でAIへの問い合わせは数回まとめて1回と数える)
   "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 6, "period": 60 } }]
