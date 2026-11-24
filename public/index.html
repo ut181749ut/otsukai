@@ -27,6 +27,7 @@
   .p .n { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; margin:6px 0 4px; }
   .p .pr { font-weight:700; font-size:15px; }
   .p .s { color:var(--sub); }
+  .p .st { display:inline-block; margin-top:6px; font-size:10px; padding:1px 6px; border-radius:999px; background:#f1ece4; color:#555; }
   .buy { background:var(--card); border:2px solid var(--ok); border-radius:12px; padding:12px; font-size:14px; }
   .buy a { display:block; text-align:center; margin-top:8px; background:var(--ok); color:#fff; text-decoration:none; padding:12px; border-radius:10px; font-weight:700; }
   .hint { color:var(--sub); font-size:12px; }
@@ -55,7 +56,7 @@
 </header>
 
 <main id="log"></main>
-<p class="pr" id="prNote" hidden>※ このアプリの商品リンクには楽天アフィリエイトを使っています(PR)</p>
+<p class="pr" id="prNote" hidden>※ このアプリの商品リンクには楽天アフィリエイト・Amazonアソシエイトを使っています(PR)。Amazonのアソシエイトとして、当アプリは適格販売により収入を得ています</p>
 
 <form id="f">
   <div id="pv" hidden><img id="pvImg" alt=""><button type="button" id="pvX" aria-label="写真を外す">×</button></div>
@@ -78,13 +79,14 @@ function fresh() { return { id: crypto.randomUUID(), messages: [], view: [] }; }
 function save() { store.set("otsukai.state", state); }
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const postage = (it) => it.postage_included === true ? "送料込" : it.postage_included === false ? "送料別" : "送料は注文画面で";
 const yen = (n) => "¥" + Number(n).toLocaleString("ja-JP");
 
 function render() {
   const log = $("#log"); log.innerHTML = "";
   if (!state.view.length) {
     const w = el("div", "welcome");
-    w.append(el("div", null, "欲しいものを言うだけ。AIが楽天市場から探して、注文画面まで案内します。"), el("div", null, "📷 切れた洗剤や、SNSで見かけた物のスクショを送れば、同じ物を探します。"), el("div", null, "スマホはホーム画面に追加すると、スクショの「共有」からすぐ頼めます。"));
+    w.append(el("div", null, "欲しいものを言うだけ。AIが楽天市場とAmazonから探して、注文画面まで案内します。"), el("div", null, "📷 切れた洗剤や、SNSで見かけた物のスクショを送れば、同じ物を探します。"), el("div", null, "スマホはホーム画面に追加すると、スクショの「共有」からすぐ頼めます。"));
     const c = el("div", "chips");
     ["2000円以内でコーヒー豆を買って", "トイレットペーパーの安いやつ", "1000円くらいのプレゼント用ハンドクリーム"].forEach((t) => {
       const b = el("button", null, t); b.type = "button"; b.onclick = () => { $("#q").value = t; $("#q").focus(); }; c.append(b);
@@ -105,7 +107,8 @@ function draw(v) {
     v.items.forEach((it) => {
       const card = el("a", "p"); card.href = it.url; card.target = "_blank"; card.rel = "noopener sponsored"; card.style.color = "inherit"; card.style.textDecoration = "none";
       if (it.image) { const im = el("img"); im.src = it.image; im.alt = ""; im.loading = "lazy"; card.append(im); }
-      card.append(el("div", "n", it.name), el("div", "pr", yen(it.price)), el("div", "s", (it.postage_included ? "送料込" : "送料別") + " ・ " + it.shop));
+      if (it.store) card.append(el("div", "st", it.store));
+      card.append(el("div", "n", it.name), el("div", "pr", yen(it.price)), el("div", "s", postage(it) + " ・ " + it.shop));
       if (it.review?.count) card.append(el("div", "s", "★" + it.review.average + "(" + it.review.count + "件)"));
       row.append(card);
     });
@@ -114,9 +117,10 @@ function draw(v) {
   if (v.kind === "checkout") {
     const box = el("div", "buy");
     if (v.item.image) { const im = el("img"); im.src = v.item.image; im.alt = ""; box.append(im); }
-    box.append(el("div", null, `🛒 合計 ${yen(v.amount)}`), el("div", "hint", v.item.name + " ×" + v.qty + (v.item.postage_included ? "" : "(送料別)")));
-    const a = el("a", null, "楽天で注文する"); a.href = v.url; a.target = "_blank"; a.rel = "noopener sponsored";
-    box.append(a, el("div", "hint", "楽天の画面で内容を確かめてから注文を確定してください。"));
+    box.append(el("div", null, `🛒 合計 ${yen(v.amount)}`), el("div", "hint", v.item.name + " ×" + v.qty + "(" + postage(v.item) + ")"));
+    const store = v.item.store || "楽天市場";
+    const a = el("a", null, store + "で注文する"); a.href = v.url; a.target = "_blank"; a.rel = "noopener sponsored";
+    box.append(a, el("div", "hint", store + "の画面で内容を確かめてから注文を確定してください。"));
     return box;
   }
   return el("div");

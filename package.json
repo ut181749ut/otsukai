@@ -1,12 +1,12 @@
 {
   "name": "otsukai-ai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/worker.test.mjs && node test/sw.test.mjs"
+    "test": "node test/worker.test.mjs && node test/amazon.test.mjs && node test/sw.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4"

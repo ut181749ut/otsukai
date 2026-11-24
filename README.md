@@ -1,12 +1,12 @@
 # おつかいAI
 
-欲しいものを言うか、写真・スクショを送るだけで、AIが楽天市場から探して注文画面まで案内する買い物アプリです。登録は要りません。
+欲しいものを言うか、写真・スクショを送るだけで、AIが楽天市場とAmazonから探して注文画面まで案内する買い物アプリです。登録は要りません。
 
 ```
 「2000円以内でコーヒー豆を買って」 / 📷 切れた洗剤の写真
-  → AIが楽天で探して、候補を3つ紹介(値段・送料・選んだ理由つき)
+  → AIが楽天とAmazonで探して、候補を3つ紹介(店・値段・送料・選んだ理由つき)
   → 「それにする」
-  → 「楽天で注文する」ボタンが出る → 楽天の画面で注文
+  → 「楽天市場で注文する」/「Amazonで注文する」ボタン → お店の画面で注文
 ```
 
 📷 **写真からも頼めます。** 撮って送ると、AIが何か特定して同じ物(なければ近い物)を探します。写真はブラウザで縮小してから送り、AIに一度見せたら履歴からは外します。
@@ -21,6 +21,7 @@
 ## 仕組み
 
 - `src/worker.js` — Cloudflare Worker。Claude(ツール使用)+ 楽天市場商品検索API
+- `src/amazon.js` — Amazon.co.jp の商品検索(Amazonアソシエイト Creators API。PA-API 5 は2026年に廃止)。鍵がなければ楽天だけで動きます
 - `public/index.html` — チャット画面(1ファイル)。`public/sw.js` と `manifest.webmanifest` でホーム画面追加と共有に対応
 - サーバーには何も保存しません。会話はブラウザに保存します
 - 注文ボタンの値段と商品ページは、AIの言った値ではなく、サーバーが楽天からその場で取り直したものを使います
@@ -29,19 +30,23 @@
 ## 動かす
 
 1. 楽天ウェブサービスでアプリ登録し、`applicationId`(UUID)と `accessKey`(pk_…)を取る。許可するWebサイトに公開URL(手元なら `http://localhost:8787`)を登録する
-2. `.dev.vars.example` を `.dev.vars` にコピーして値を入れる
-3. `npm install` → `npm run dev`(手元) / `npm run deploy`(公開)
-4. 公開時は `npx wrangler secret put ANTHROPIC_API_KEY` などで秘密の値を入れ、`wrangler.jsonc` の `SITE_URL` を公開URLにする
+2. Amazonも探すなら、Amazonアソシエイトの「Creators API」画面でアプリと認証情報を作る(認証情報ID・シークレット・バージョン、トラッキングID)
+3. `.dev.vars.example` を `.dev.vars` にコピーして値を入れる
+4. `npm install` → `npm run dev`(手元) / `npm run deploy`(公開)
+5. 公開時は `npx wrangler secret put ANTHROPIC_API_KEY` などで秘密の値を入れ、`wrangler.jsonc` の `SITE_URL` を公開URLにする
 
 テスト(外部APIは偽物に差し替え): `npm test`
 
 ## お金
 
-- **収入**: `RAKUTEN_AFFILIATE_ID` を入れると、商品リンクと注文ボタンが楽天アフィリエイトのリンクになります(画面に「PR」の表示が出ます)
+- **収入**: `RAKUTEN_AFFILIATE_ID` を入れると楽天アフィリエイト、Amazonは `AMAZON_PARTNER_TAG` 付きのリンクになります(画面に「PR」の表示が出ます)
+- Amazonの紹介料は、スマホアプリ経由だと Amazon に承認されたアプリ(Approved Mobile Application)でないと対象外です。Web版はそのままで対象
+- Amazonの検索回数の上限は最初の30日が1日8640回。その後はAmazon経由の売上に応じて増減します
 - **費用**: Claude APIの料金。`MODEL` を `claude-haiku-5-5` にすると大きく下がります
 
 ## まだできないこと
 
 - **注文確定の自動化**: 楽天・Amazonには外部から注文できる公開APIがありません
 - **送料**: 送料別の商品は送料を含めずに表示します(「送料別」と出します)
-- **Amazon・Yahoo!ショッピング**: 検索元を足せば対応できます
+- **Yahoo!ショッピング**: 検索元を足せば対応できます
+- **Amazonのレビュー・送料**: Creators API では取れないので、カードに出しません

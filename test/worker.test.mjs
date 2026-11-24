@@ -51,7 +51,7 @@ assert.equal(sent.length, 2);
 assert.equal(sent[0].source.type, "base64");
 
 // 5. 他のサービスには一切つながない
-assert.ok(calls.every((c) => /api\.anthropic\.com|openapi\.rakuten\.co\.jp/.test(c.url)));
+assert.ok(calls.every((c) => /api\.anthropic\.com|openapi\.rakuten\.co\.jp/.test(c.url))); // Amazon未設定なら楽天だけ
 
 console.log("ok: 5 scenarios passed");
 
