@@ -206,7 +206,7 @@ async function ask(text, hidden, img) {
       state.messages.push(m);
       if (m.role === "assistant") { const t = m.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim(); if (t) state.view.push({ kind: "ai", text: t }); }
     });
-    if (d.error) state.view.push({ kind: "ai", text: "エラーが起きました: " + (d.message || d.error) });
+    if (d.error) state.view.push({ kind: "ai", text: d.error === "rate_limited" ? d.message : "エラーが起きました: " + (d.message || d.error) });
     if (d.error && !(d.messages || []).length) state.messages.pop();
   } catch (e) {
     state.messages.pop();

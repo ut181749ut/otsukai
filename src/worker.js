@@ -90,7 +90,17 @@ export function cleanMessages(list) {
   });
 }
 
+// 使いすぎ防止: 同じ人(IPアドレス)からは1分に CHAT_PER_MINUTE 回まで(既定6回)。
+// 全体のAI代の上限は Anthropic の管理画面の「使用上限」でかける。
+async function overLimit(req, env) {
+  if (!env.LIMITER) return false;
+  const ip = req.headers.get("cf-connecting-ip") || "unknown";
+  const { success } = await env.LIMITER.limit({ key: "chat:" + ip });
+  return !success;
+}
+
 async function chat(req, env) {
+  if (await overLimit(req, env)) return json({ error: "rate_limited", message: "少し使いすぎです。1分ほど待ってからもう一度送ってください。" }, 429);
   if (Number(req.headers.get("content-length") || 0) > MAX_BODY) return json({ error: "too_large", message: "写真が大きすぎます。" }, 413);
   let b;
   try { b = await req.json(); } catch { return json({ error: "bad_json" }, 400); }

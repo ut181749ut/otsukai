@@ -6,7 +6,9 @@
   "vars": {
     "MODEL": "claude-sonnet-5-5",
     "SITE_URL": "https://otsukai-ai.example.workers.dev/"
-  }
+  },
+  // 使いすぎ防止: 同じIPから1分に6回まで(1回の相談でAIへの問い合わせは数回まとめて1回と数える)
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 6, "period": 60 } }]
   // 秘密の値は `npx wrangler secret put 名前` で入れる:
   // ANTHROPIC_API_KEY, RAKUTEN_APP_ID, RAKUTEN_ACCESS_KEY, RAKUTEN_AFFILIATE_ID(任意)
   // Amazonも探すなら: AMAZON_CREDENTIAL_ID, AMAZON_CREDENTIAL_SECRET, AMAZON_CREDENTIAL_VERSION(3.3), AMAZON_PARTNER_TAG

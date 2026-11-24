@@ -66,3 +66,17 @@ claudeScript = [text("はい")];
 const evil = await worker.fetch(new Request("https://t/api/chat", { method: "POST", headers: { origin: "https://evil.example" }, body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }) }), env);
 assert.equal(evil.headers.get("access-control-allow-origin"), null);
 console.log("ok: app CORS");
+
+// 7. 使いすぎ防止: 同じIPは上限を超えたら429、AIは呼ばない
+let used = 0;
+const limited = { ...env, LIMITER: { limit: async ({ key }) => ({ success: key === "chat:1.2.3.4" && ++used <= 2 }) } };
+const send = (ip) => worker.fetch(new Request("https://t/api/chat", { method: "POST", headers: { "cf-connecting-ip": ip }, body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }) }), limited);
+claudeScript = [text("はい"), text("はい")];
+assert.equal((await send("1.2.3.4")).status, 200);
+assert.equal((await send("1.2.3.4")).status, 200);
+calls = [];
+const over = await send("1.2.3.4");
+assert.equal(over.status, 429);
+assert.equal((await over.json()).error, "rate_limited");
+assert.equal(calls.length, 0);
+console.log("ok: rate limit");
