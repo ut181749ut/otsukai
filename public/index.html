@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>おつかいAI — 言うだけ・撮るだけで買い物</title>
+<meta name="otsukai-api" content="">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#e8590c">
 <link rel="icon" href="/icon-192.png">
@@ -65,6 +66,9 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+// スマホアプリ(Capacitor)の中ではサーバーが別の場所にあるので、そのURLを使う。Webでは同じ場所
+const API = ($('meta[name="otsukai-api"]')?.content || "").replace(/\/$/, "");
+const NATIVE = !!window.Capacitor?.isNativePlatform?.();
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -159,7 +163,22 @@ async function takeShared() {
     } else if (text) { $("#q").value = text; }
   } catch {}
 }
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+if (!NATIVE && "serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+// スマホアプリ: スクショを「共有」→ おつかいAI で、写真を受け取ってすぐAIへ送る
+if (NATIVE) {
+  try {
+    const share = window.Capacitor.registerPlugin("CapacitorShareTarget");
+    share.addListener("shareReceived", async (e) => {
+      const f = (e.files || []).find((x) => (x.mimeType || "").startsWith("image/"));
+      const text = (e.texts || []).join(" ").trim().slice(0, 500);
+      if (f) {
+        const src = f.uri.startsWith("data:") ? f.uri : window.Capacitor.convertFileSrc(f.uri);
+        const blob = await (await fetch(src)).blob();
+        if (await setPhoto(blob)) { if (text) $("#q").value = text; $("#f").requestSubmit(); }
+      } else if (text) { $("#q").value = text; }
+    });
+  } catch {}
+}
 $("#pvX").onclick = () => { photo = null; $("#pv").hidden = true; };
 
 async function ask(text, hidden, img) {
@@ -175,7 +194,7 @@ async function ask(text, hidden, img) {
   save(); render(); busy(true);
   const thinking = el("div", "msg ai", "…"); $("#log").append(thinking);
   try {
-    const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: state.messages }) });
+    const r = await fetch(API + "/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: state.messages }) });
     const d = await r.json();
     // 画面用の出来事(商品カード・注文ボタン)を、AIの文の前に並べる
     (d.events || []).forEach((e) => state.view.push(e.type === "products" ? { kind: "products", items: e.items } : { kind: e.type, ...e }));

@@ -54,3 +54,15 @@ assert.equal(sent[0].source.type, "base64");
 assert.ok(calls.every((c) => /api\.anthropic\.com|openapi\.rakuten\.co\.jp/.test(c.url)));
 
 console.log("ok: 5 scenarios passed");
+
+// 6. スマホアプリ(https://localhost)からの呼び出しにCORSを返す。他のサイトには返さない
+const pre = await worker.fetch(new Request("https://t/api/chat", { method: "OPTIONS", headers: { origin: "https://localhost" } }), env);
+assert.equal(pre.status, 204);
+assert.equal(pre.headers.get("access-control-allow-origin"), "https://localhost");
+claudeScript = [text("はい")];
+const ok = await worker.fetch(new Request("https://t/api/chat", { method: "POST", headers: { origin: "https://localhost" }, body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }) }), env);
+assert.equal(ok.headers.get("access-control-allow-origin"), "https://localhost");
+claudeScript = [text("はい")];
+const evil = await worker.fetch(new Request("https://t/api/chat", { method: "POST", headers: { origin: "https://evil.example" }, body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }) }), env);
+assert.equal(evil.headers.get("access-control-allow-origin"), null);
+console.log("ok: app CORS");

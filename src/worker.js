@@ -51,10 +51,24 @@ const TOOLS = [
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 
+// スマホアプリ(Capacitor)からの呼び出しを許す。Android は https://localhost、iOS は capacitor://localhost
+const APP_ORIGINS = new Set(["https://localhost", "capacitor://localhost"]);
+function cors(req, res) {
+  const o = req.headers.get("origin");
+  if (!o || !APP_ORIGINS.has(o)) return res;
+  const h = new Headers(res.headers);
+  h.set("access-control-allow-origin", o);
+  h.set("access-control-allow-methods", "POST, OPTIONS");
+  h.set("access-control-allow-headers", "content-type");
+  h.set("vary", "origin");
+  return new Response(res.body, { status: res.status, headers: h });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === "/api/chat" && req.method === "POST") return chat(req, env);
+    if (url.pathname.startsWith("/api/") && req.method === "OPTIONS") return cors(req, new Response(null, { status: 204 }));
+    if (url.pathname === "/api/chat" && req.method === "POST") return cors(req, await chat(req, env));
     if (url.pathname.startsWith("/api/")) return json({ error: "not_found" }, 404);
     // サービスワーカーがまだ動いていないときの共有は、とりあえずアプリを開く
     if (url.pathname === "/share" && req.method === "POST") return Response.redirect(new URL("/", url), 303);
